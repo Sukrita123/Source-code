@@ -1,0 +1,82 @@
+public class MYMYMYClientCache {
+
+    public static final String MYMYMY_CLIENT_PROP_CACHE_CLASS                  = "myproject.MYMYMY.client.cache_class";
+    public static final String MYMYMY_CLIENT_PROP_EHCACHE_XML_PATH_ROLE_ACCESS = "myproject.MYMYMY.client.ehcache_xml_path";
+
+    // Note: caches might be null !
+    private Cache<DomainAndPrincipal, RoleAccess> roleAccessCache;
+    // ...more to come?
+
+    private File ehcacheConfigXmlFile;
+    private XmlConfiguration xmlConfiguration;
+    private CacheManagerBuilder<CacheManager> cacheManagerBuilder;
+    private CacheManager cacheManager;
+
+    private static final Logger LOG = LoggerFactory.getLogger(MYMYMYClientCache.class);
+
+public static MYMYMYClientCache getInstance() {
+        return SingletonHolder.INSTANCE;
+    }
+
+    public Cache<DomainAndPrincipal, RoleAccess> getRoleAccessCache() {
+        return roleAccessCache;
+    }
+
+    /** The correct way to implement singleton: see https://en.wikipedia.org/wiki/Double-checked_locking#Usage_in_Java */
+    private static class SingletonHolder {
+        public static final MYMYMYClientCache INSTANCE = createMYMYMYClientCache();
+    }
+
+    /** Construct a MYMYMYClientCache using the configured class */
+    private static MYMYMYClientCache createMYMYMYClientCache() throws ExceptionInInitializerError {
+        String MYMYMYClientCacheClass = System.getProperty(MYMYMY_CLIENT_PROP_CACHE_CLASS, MYMYMYClientCache.class.getName());
+        try {
+            return (MYMYMYClientCache) Class.forName(MYMYMYClientCacheClass).getConstructor().newInstance();
+        } catch (Exception exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
+    }
+
+    public MYMYMYClientCache() {
+        // Find the config file.
+        String ehcacheConfigXmlFileName = System.getProperty(MYMYMY_CLIENT_PROP_EHCACHE_XML_PATH_ROLE_ACCESS);
+        if ((ehcacheConfigXmlFileName == null) || ehcacheConfigXmlFileName.isEmpty()) {
+            LOG.info("MYMYMYClient cache is disabled: system-property \"{}\" is not set", MYMYMY_CLIENT_PROP_EHCACHE_XML_PATH_ROLE_ACCESS);
+            return;
+        }
+
+        // Check if the config file exists.
+        ehcacheConfigXmlFile = new File(ehcacheConfigXmlFileName);
+        if (! ehcacheConfigXmlFile.isFile()) {
+            LOG.info("MYMYMYClient cache is disabled: system-property \"{}\" doesn't reference a file", MYMYMY_CLIENT_PROP_EHCACHE_XML_PATH_ROLE_ACCESS);
+            xmlConfiguration = null;
+            return;
+        }
+
+        // Load the config file.
+        LOG.info("MYMYMYClient cache is initializing (system-property \"{}\" references the file \"{}\")", MYMYMY_CLIENT_PROP_EHCACHE_XML_PATH_ROLE_ACCESS, ehcacheConfigXmlFile.getAbsoluteFile());
+        try {
+            xmlConfiguration = new XmlConfiguration(ehcacheConfigXmlFile.toURI().toURL());
+        } catch (Exception exception) {
+            LOG.error("MYMYMYClient cache is disabled: system-property \"{}\" references the file \"{}\" - which has errors: ", MYMYMY_CLIENT_PROP_EHCACHE_XML_PATH_ROLE_ACCESS, ehcacheConfigXmlFile.getAbsoluteFile(), exception);
+            return;
+        }
+
+        // We have multiple caches, but we want to use a single CacheManager:
+        // Phase 1: build a CacheManager, after preparing all cache-configurations into it's builder.
+        cacheManagerBuilder = CacheManagerBuilder.newCacheManagerBuilder();
+        List<Runnable> phase2Executions = prepareAllCaches();
+        try {
+            cacheManager = cacheManagerBuilder.build(true);
+        } catch (Exception exception) {
+            LOG.error("MYMYMYClient cache is disabled: system-property \"{}\" references the file \"{}\" - which has build errors: ", MYMYMY_CLIENT_PROP_EHCACHE_XML_PATH_ROLE_ACCESS, ehcacheConfigXmlFile.getAbsoluteFile(), exception);
+            return;
+        }
+
+        // Phase 2: build actual caches, and assign them to members.
+        for (Runnable phase2Execution : phase2Executions) {
+            if (phase2Execution != null) {
+                phase2Execution.run();
+            }
+        }
+    }
